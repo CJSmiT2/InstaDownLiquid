@@ -36,10 +36,15 @@ public class InstagramDownloader {
     private final int accountSleep = 15;
 
     private final IGClient instagramClient;
+    
+    private final boolean updateOnly;
 
     public InstagramDownloader(
             String login,
-            String password) throws IGLoginException {
+            String password,
+            boolean updateOnly) throws IGLoginException {
+        
+        this.updateOnly = updateOnly;
 
         instagramClient = IGClient.builder()
                 .username(login)
@@ -51,7 +56,7 @@ public class InstagramDownloader {
         Random random = new Random();
         int secA = random.nextInt(accountSleep);
         System.out.println("Account sleep: " + secA + " sec ...");
-        sleep((secA + 5) * 1000);
+        sleep((5 + secA) * 1000);
 
         System.out.println("Fetch urls...");
         AtomicLong userPk = new AtomicLong();
@@ -88,6 +93,11 @@ public class InstagramDownloader {
 
             removeExists(urls, accountFolder);
 
+            if (this.updateOnly && urls.isEmpty()) {
+                next = false;
+                System.out.println("Skip download account: " + accountFolder.getName());
+            }
+
             downloadFromUrls(urls, random, accountFolder, instagramClient);
 
             nextMaxId = response.getNext_max_id();
@@ -107,7 +117,7 @@ public class InstagramDownloader {
         for (int i = 0; i < urls.size(); i++) {
             int secB = random.nextInt(urlSleep);
             System.out.println("URL sleep: " + secB + " sec ...");
-            sleep((secB++) * 1000);
+            sleep((++secB) * 1000);
 
             String fileName = getFileName(urls.get(i));
             System.out.println("[" + (i + 1) + "/" + urls.size() + "] Url: " + fileName);

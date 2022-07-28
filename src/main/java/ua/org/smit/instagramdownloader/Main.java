@@ -19,10 +19,11 @@ public class Main {
 
         String login = appProps.getProperty("login");
         String password = appProps.getProperty("password");
+        boolean updateOnly = Boolean.valueOf(appProps.getProperty("update_only"));
 
         System.out.println("Login: '" + login + "', password: '" + password + "'");
 
-        InstagramDownloader instagram = new InstagramDownloader(login, password);
+        InstagramDownloader instagram = new InstagramDownloader(login, password, updateOnly);
 
         TxtFile txt = new TxtFile(programmFolder + File.separator + "accounts.txt");
         for (String account : txt.readByLines()) {
