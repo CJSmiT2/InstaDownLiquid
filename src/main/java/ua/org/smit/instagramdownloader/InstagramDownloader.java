@@ -18,7 +18,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import static java.lang.Thread.sleep;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Random;
@@ -26,7 +28,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import ua.org.smit.commontlx.filesystem.FileCms;
 import ua.org.smit.commontlx.filesystem.FolderCms;
+import ua.org.smit.commontlx.filesystem.TxtFile;
 
 public class InstagramDownloader {
 
@@ -36,14 +40,14 @@ public class InstagramDownloader {
     private final int accountSleep = 15;
 
     private final IGClient instagramClient;
-    
+
     private final boolean updateOnly;
 
     public InstagramDownloader(
             String login,
             String password,
             boolean updateOnly) throws IGLoginException {
-        
+
         this.updateOnly = updateOnly;
 
         instagramClient = IGClient.builder()
@@ -79,32 +83,40 @@ public class InstagramDownloader {
 
         while (next) {
 
-            System.out.println("Response: " + (feedCount + 1));
+            try {
+                System.out.println("Response: " + (feedCount + 1));
 
-            if (feedCount > 0) {
-                request.setMax_id(nextMaxId);
-                System.out.println("nextMaxId: " + nextMaxId);
+                if (feedCount > 0) {
+                    request.setMax_id(nextMaxId);
+                    System.out.println("Account: '"
+                            + accountFolder.getName() + "',"
+                            + " nextMaxId: " + nextMaxId);
+                }
+
+                FeedUserResponse response = instagramClient.sendRequest(request).join();
+
+                List<TimelineMedia> items = response.getItems();
+                List<String> urls = getUrls(items);
+
+                removeExists(urls, accountFolder);
+
+                if (this.updateOnly && urls.isEmpty()) {
+                    next = false;
+                    System.out.println("Skip download account: " + accountFolder.getName());
+                    break;
+                }
+
+                downloadFromUrls(urls, random, accountFolder, instagramClient);
+
+                nextMaxId = response.getNext_max_id();
+
+                feedCount++;
+                next = (nextMaxId != null);
+
+            } catch (SocketTimeoutException ex) {
+                System.err.println("ERROR: " + ex);
+                System.out.println("Retry...");
             }
-
-            FeedUserResponse response = instagramClient.sendRequest(request).join();
-
-            List<TimelineMedia> items = response.getItems();
-            List<String> urls = getUrls(items);
-
-            removeExists(urls, accountFolder);
-
-            if (this.updateOnly && urls.isEmpty()) {
-                next = false;
-                System.out.println("Skip download account: " + accountFolder.getName());
-            }
-
-            downloadFromUrls(urls, random, accountFolder, instagramClient);
-
-            nextMaxId = response.getNext_max_id();
-
-            feedCount++;
-            next = (nextMaxId != null);
-
             sleep(feedSleep * 1000);
         }
     }
@@ -113,6 +125,8 @@ public class InstagramDownloader {
             Random random,
             FolderCms accountFolder,
             IGClient instagramClient) throws InterruptedException, IOException {
+        
+        TxtFile txt = new TxtFile(accountFolder + File.separator + "downloaded.txt");
 
         for (int i = 0; i < urls.size(); i++) {
             int secB = random.nextInt(urlSleep);
@@ -120,9 +134,12 @@ public class InstagramDownloader {
             sleep((++secB) * 1000);
 
             String fileName = getFileName(urls.get(i));
-            System.out.println("[" + (i + 1) + "/" + urls.size() + "] Url: " + fileName);
+            System.out.println("[" + (i + 1) + "/" + urls.size() + "], "
+                    + "'" + accountFolder.getName() + "' "
+                            + "Url: " + fileName);
             String dest = accountFolder + File.separator + fileName;
             downloadFile(instagramClient.getHttpClient(), urls.get(i), dest);
+            txt.addToFile(fileName);
         }
     }
 
@@ -152,6 +169,7 @@ public class InstagramDownloader {
         output.flush();
         output.close();
         input.close();
+        
     }
 
     List<String> getUrls(List<TimelineMedia> timelineMedias) {
@@ -180,15 +198,50 @@ public class InstagramDownloader {
     }
 
     private void removeExists(List<String> urls, FolderCms accountFolder) {
+        List<String> downloadedFiles = getDownloaded(accountFolder);
+
         Iterator<String> i = urls.iterator();
         while (i.hasNext()) {
             String url = i.next();
             String fileName = getFileName(url);
-            if (accountFolder.isFileExist(fileName)) {
+
+            if (accountFolder.isFileExist(fileName)
+                    || isExistInList(fileName, downloadedFiles)) {
                 i.remove();
-                System.out.println("IGNORE: " + fileName);
+//                System.out.println("IGNORE: " + fileName);
             }
+
         }
+
     }
 
+    private boolean isExistInList(String name, List<String> list) {
+        for (String item : list) {
+            if (item.equals(name)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> getDownloaded(FolderCms accountFolder) {
+        TxtFile txt = new TxtFile(accountFolder + File.separator + "downloaded.txt");
+        if (!txt.exists()) {
+            System.out.println("'" + txt.getName() + "' Not exist! Create new: '" + txt + "'");
+            List<FileCms> files = accountFolder.getFilesByExtensions(
+                    Arrays.asList(
+                            FileCms.Extension.JPG,
+                            FileCms.Extension.MP4,
+                            FileCms.Extension.WEBM));
+
+            for (FileCms media : files) {
+                txt.addToFile(media.getName());
+            }
+
+        }
+        if (!txt.exists()){
+            return new ArrayList<>();
+        }
+        return txt.readByLines();
+    }
 }
